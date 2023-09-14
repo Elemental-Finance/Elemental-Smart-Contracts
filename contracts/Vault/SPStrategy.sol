@@ -53,14 +53,18 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 
 	/// @notice Set the treasury address
 	function setTreasury(address _treasury) public onlyOwner {
-		if (_treasury == address(0)) revert SPStrategy__ZeroAddress();
+		if (_treasury == address(0)) {
+			revert SPStrategy__ZeroAddress();
+		}
 		require(_treasury != address(this), "Vault: treasury cannot be this contract");
 		treasury = _treasury;
 	}
 
 	/// @notice Set the price feed address
 	function setPriceFeed(address _priceFeed) public onlyOwner {
-		if (_priceFeed == address(0)) revert SPStrategy__ZeroAddress();
+		if (_priceFeed == address(0)) {
+			revert SPStrategy__ZeroAddress();
+		}
 		priceFeed = _priceFeed;
 	}
 
@@ -95,8 +99,12 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 	function swap(address _tokenOut, uint _amountIn, uint _minOut) external override returns (uint) {
 		(uint amountOut, uint fee) = _getAmountOut(_tokenOut, _amountIn);
 
-		if (amountOut < _minOut) revert SPStrategy__InsufficientOutputAmount();
-		if (!_checkAndClaimAvailableCollaterals(_tokenOut, amountOut)) revert SPStrategy__InsufficientFundsForSwap();
+		if (amountOut < _minOut) {
+			revert SPStrategy__InsufficientOutputAmount();
+		}
+		if (!_checkAndClaimAvailableCollaterals(_tokenOut, amountOut)) {
+			revert SPStrategy__InsufficientFundsForSwap();
+		}
 
 		address debtToken = DEBT_TOKEN;
 		IERC20(debtToken).safeTransferFrom(msg.sender, address(this), _amountIn);
@@ -107,10 +115,14 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 	}
 
 	function _getAmountOut(address _tokenOut, uint _amountIn) private view returns (uint, uint) {
-		if (!swapCollaterals[_tokenOut]) revert SPStrategy__CollateralNotEnabledForSwap();
+		if (!swapCollaterals[_tokenOut]) {
+			revert SPStrategy__CollateralNotEnabledForSwap();
+		}
 
 		uint price = IPriceFeed(priceFeed).fetchPrice(_tokenOut);
-		if (price == 0) revert SPStrategy__PriceFeedError();
+		if (price == 0) {
+			revert SPStrategy__PriceFeedError();
+		}
 
 		uint fee = (_amountIn * swapFee) / 10000;
 		// TODO: Check if the feeder always return 18 decimals
