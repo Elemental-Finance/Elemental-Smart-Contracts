@@ -132,7 +132,9 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 	}
 
 	function _checkAndClaimAvailableCollaterals(address _token, uint _requiredAmount) private returns (bool) {
-		if (IERC20(_token).balanceOf(address(this)) >= _requiredAmount) return true;
+		if (IERC20(_token).balanceOf(address(this)) >= _requiredAmount){ 
+			return true
+		};
 		_claimAssets();
 		return IERC20(_token).balanceOf(address(this)) >= _requiredAmount;
 	}
