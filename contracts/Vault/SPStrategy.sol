@@ -15,6 +15,7 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 
 	address public immutable STABILITY_POOL;
 	address public immutable DEBT_TOKEN;
+	address public immutable VAULT;
 	address public treasury;
 	address public priceFeed;
 	uint public swapFee;
@@ -27,22 +28,48 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 	error SPStrategy__InsufficientOutputAmount();
 	error SPStrategy__InsufficientFundsForSwap();
 	error SPStrategy__PriceFeedError();
+	error SPStrategy__OnlyVault();
 
-	constructor(address _debtToken, address _treasury, address _priceFeed, uint _swapFee, address _stabilityPool) {
+	constructor(
+		address _debtToken, 
+		address _treasury, 
+		address _priceFeed, 
+		uint _swapFee, 
+		address _stabilityPool,
+		address _vault
+	) {
 		setTreasury(_treasury);
 		setPriceFeed(_priceFeed);
 		setSwapFee(_swapFee);
 		DEBT_TOKEN = _debtToken;
 		STABILITY_POOL = _stabilityPool;
+		VAULT = _vault;
 	}
 
 	// ----------------- IStrategyV7 -----------------
+
+	modifier onlyVault() {
+		if(msg.sender != VAULT) {
+			revert SPStrategy__OnlyVault();
+		}
+	}
+
+	function vault() external view override returns(address){
+		return VAULT;
+	}
 
 	function want() external view override returns (address) {
 		return DEBT_TOKEN;
 	}
 
-	// TODO: Implement IStrategyV7
+	function beforeDeposit() external view onlyVault override returns() {
+		//does nothing
+	}
+
+	function deposit() external view onlyVault override returns() {
+		uint balance = IERC20(DEBT_TOKEN).balanceOf(address(this));
+		IStabilityPool(STABILITY_POOL).provideToSP(balance, claimCollaterals);
+	}
 
 	// ----------------- Admin -----------------
 
@@ -110,7 +137,7 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 		IERC20(debtToken).safeTransferFrom(msg.sender, address(this), _amountIn);
 		IERC20(debtToken).safeTransfer(treasury, fee);
 		IERC20(_tokenOut).safeTransfer(msg.sender, amountOut);
-
+		deposit(); //deposits funds from swap
 		return amountOut;
 	}
 
