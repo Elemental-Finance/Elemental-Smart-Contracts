@@ -9,7 +9,7 @@ interface IStrategyV7 {
     function want() external view returns (IERC20Upgradeable);
     function beforeDeposit() external;
     function deposit() external;
-    function withdraw(uint256) external;
+    function withdrawTo(uint256, address) external;
     function balanceOf() external view returns (uint256);
     function balanceOfWant() external view returns (uint256);
     function balanceOfPool() external view returns (uint256);
@@ -19,5 +19,4 @@ interface IStrategyV7 {
     function pause() external;
     function unpause() external;
     function paused() external view returns (bool);
-    function unirouter() external view returns (address);
 }

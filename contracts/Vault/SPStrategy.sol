@@ -4,23 +4,22 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./Interfaces/IStrategyV7.sol";
 import "./Interfaces/ISPStrategy.sol";
 import "../Interfaces/IStabilityPool.sol";
 import "../Interfaces/IPriceFeed.sol";
+import "../Interfaces/IERC20Decimals.sol";
 
-contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
+contract SPStrategy is IStrategyV7, Ownable {
 	using SafeERC20 for IERC20;
 
 	address public immutable STABILITY_POOL;
 	address public immutable DEBT_TOKEN;
 	address public immutable VAULT;
-	address public treasury;
-	address public priceFeed;
-	uint public swapFee;
-	mapping(address => bool) public swapCollaterals;
 	address[] public claimCollaterals;
+	address public priceFeed;
 
 	error SPStrategy__ZeroAddress();
 	error SPStrategy__ArrayNotInAscendingOrder();
@@ -32,18 +31,14 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 
 	constructor(
 		address _debtToken, 
-		address _treasury, 
-		address _priceFeed, 
-		uint _swapFee, 
 		address _stabilityPool,
-		address _vault
+		address _vault,
+		address _priceFeed
 	) {
-		setTreasury(_treasury);
-		setPriceFeed(_priceFeed);
-		setSwapFee(_swapFee);
 		DEBT_TOKEN = _debtToken;
 		STABILITY_POOL = _stabilityPool;
 		VAULT = _vault;
+		setPriceFeed(_priceFeed);
 	}
 
 	// ----------------- IStrategyV7 -----------------
@@ -52,54 +47,116 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 		if(msg.sender != VAULT) {
 			revert SPStrategy__OnlyVault();
 		}
+		_;
 	}
 
 	function vault() external view override returns(address){
 		return VAULT;
 	}
 
-	function want() external view override returns (address) {
-		return DEBT_TOKEN;
+	function want() public view override returns (IERC20Upgradeable) {
+		return IERC20Upgradeable(DEBT_TOKEN);
 	}
 
-	function beforeDeposit() external view onlyVault override returns() {
+	function beforeDeposit() external onlyVault override {
 		//does nothing
 	}
 
-	function deposit() external view onlyVault override returns() {
-		uint balance = IERC20(DEBT_TOKEN).balanceOf(address(this));
+	function deposit() public onlyVault override {
+		uint balance = balanceOfWant();
 		IStabilityPool(STABILITY_POOL).provideToSP(balance, claimCollaterals);
 	}
 
+	function withdrawTo(uint256 _amount, address _to) external onlyVault override {
+		uint256 collateralValue = valueOfCollaterals();
+		uint256 wantBal = balanceOf();
+		// Trying not to send dust, only sends debt token if the collat. value is less than 1%
+		bool shouldWithdrawCollateral = (collateralValue * 100_00 / wantBal) > 1_00;
+		if(shouldWithdrawCollateral){
+			uint256 shares = _amount * 10**18 / (wantBal + collateralValue);
+			withdrawDebtToken(wantBal * shares / 10**18, _to);
+			withdrawCollaterals(shares, _to);
+		} else {
+			withdrawDebtToken(_amount, _to);
+		}
+	}
+
+	function withdrawDebtToken(uint256 _amount, address _to) internal {
+		IStabilityPool(STABILITY_POOL).withdrawFromSP(_amount, claimCollaterals);
+		IERC20(DEBT_TOKEN).safeTransfer(_to, _amount);
+	}
+
+	function withdrawCollaterals(uint256 _percentShare, address _to) internal {
+		for (uint i = 0; i < claimCollaterals.length; i++) {
+			IERC20 token = IERC20(claimCollaterals[i]);
+			uint256 balance = token.balanceOf(address(this));
+			uint256 amount = _percentShare * balance / 10**18;
+			token.safeTransfer(_to, amount);
+		}
+	}
+
+	function debtBalance() public view returns(uint256) {
+		return balanceOfWant() + balanceOfPool();
+	}
+
+	function balanceOf() public view returns (uint256){
+		return balanceOfWant() + balanceOfPool() + valueOfCollaterals();
+	}
+
+    function balanceOfWant() public view returns (uint256) {
+		return want().balanceOf(address(this));
+	}
+
+	/**
+	 * Returns the value of all collaterals
+	 */
+	function valueOfCollaterals() public view returns (uint256) {
+		(address[] memory assetGains, uint256[] memory amounts) = balanceOfCollaterals();
+		uint256 value = 0;
+		for(uint256 i = 0; i < assetGains.length; i++){
+			if (amounts[i] > 0){
+				uint256 price = IPriceFeed(priceFeed).fetchPrice(assetGains[i]);
+				value += (price * amounts[i]) / (10 ** IERC20Decimals(assetGains[i]).decimals());
+			} 
+		}
+		return value;
+	}
+
+	/**
+	* Sums the collateral in the SP and in the strat
+	*/
+	function balanceOfCollaterals() public view returns (address[] memory, uint256[] memory){
+		(address[] memory assetGains, uint256[] memory amounts) = IStabilityPool(STABILITY_POOL).getDepositorGains(address(this), claimCollaterals);
+		for(uint256 i = 0; i < assetGains.length; i++){
+			amounts[i] += IERC20(assetGains[i]).balanceOf(address(this));
+		}
+		return (assetGains, amounts);
+	}
+
+    function balanceOfPool() public view returns (uint256) {
+		return IStabilityPool(STABILITY_POOL).getCompoundedDebtTokenDeposits(address(this));
+	}
+
+	function harvest() external {
+		_claimAssets();
+	}
+
+	function _claimAssets() internal {
+		IStabilityPool(STABILITY_POOL).withdrawFromSP(0, claimCollaterals);
+	}
+    function retireStrat() external {
+
+	}
+    function panic() external {
+
+	}
+    function pause() external{}
+    function unpause() external{}
+    function paused() external view returns (bool){
+		return false;
+	}
+
 	// ----------------- Admin -----------------
-
-	/// @notice Enable o disable a collateral for swap
-	function setCollateralSwap(address _collateral, bool _whitelisted) external onlyOwner {
-		swapCollaterals[_collateral] = _whitelisted;
-	}
-
-	/// @notice Set the treasury address
-	function setTreasury(address _treasury) public onlyOwner {
-		if (_treasury == address(0)) {
-			revert SPStrategy__ZeroAddress();
-		}
-		require(_treasury != address(this), "Vault: treasury cannot be this contract");
-		treasury = _treasury;
-	}
-
-	/// @notice Set the price feed address
-	function setPriceFeed(address _priceFeed) public onlyOwner {
-		if (_priceFeed == address(0)) {
-			revert SPStrategy__ZeroAddress();
-		}
-		priceFeed = _priceFeed;
-	}
-
-	/// @notice Set the swap fee
-	/// @param _rate The swap fee rate in basis points
-	function setSwapFee(uint _rate) public onlyOwner {
-		swapFee = _rate;
-	}
 
 	/// @notice Set collaterals to claim from the stability pool
 	/// @dev At the claim, the collaterals array must be in ascending order,
@@ -113,60 +170,11 @@ contract SPStrategy is ISPStrategy, IStrategyV7, Ownable {
 		claimCollaterals = _collaterals;
 	}
 
-	/// @notice Get the swap amount out from _tokenOut to DebtToken
-	function getAmountOut(address _tokenOut, uint _amountIn) public view override returns (uint) {
-		(uint amountOut, ) = _getAmountOut(_tokenOut, _amountIn);
-		return amountOut;
-	}
-
-	/// @notice Swap DebtToken for _tokenOut
-	/// @param _tokenOut The token to swap to
-	/// @param _amountIn The amount of DebtToken to swap
-	/// @param _minOut The minimum amount of _tokenOut to receive
-	function swap(address _tokenOut, uint _amountIn, uint _minOut) external override returns (uint) {
-		(uint amountOut, uint fee) = _getAmountOut(_tokenOut, _amountIn);
-
-		if (amountOut < _minOut) {
-			revert SPStrategy__InsufficientOutputAmount();
+	/// @notice Set the price feed address
+	function setPriceFeed(address _priceFeed) public onlyOwner {
+		if (_priceFeed == address(0)) {
+			revert SPStrategy__ZeroAddress();
 		}
-		if (!_checkAndClaimAvailableCollaterals(_tokenOut, amountOut)) {
-			revert SPStrategy__InsufficientFundsForSwap();
-		}
-
-		address debtToken = DEBT_TOKEN;
-		IERC20(debtToken).safeTransferFrom(msg.sender, address(this), _amountIn);
-		IERC20(debtToken).safeTransfer(treasury, fee);
-		IERC20(_tokenOut).safeTransfer(msg.sender, amountOut);
-		deposit(); //deposits funds from swap
-		return amountOut;
-	}
-
-	function _getAmountOut(address _tokenOut, uint _amountIn) private view returns (uint, uint) {
-		if (!swapCollaterals[_tokenOut]) {
-			revert SPStrategy__CollateralNotEnabledForSwap();
-		}
-
-		uint price = IPriceFeed(priceFeed).fetchPrice(_tokenOut);
-		if (price == 0) {
-			revert SPStrategy__PriceFeedError();
-		}
-
-		uint fee = (_amountIn * swapFee) / 10000;
-		// TODO: Check if the feeder always return 18 decimals
-		uint amountOut = ((_amountIn - fee) * price) / 1e18;
-
-		return (amountOut, fee);
-	}
-
-	function _checkAndClaimAvailableCollaterals(address _token, uint _requiredAmount) private returns (bool) {
-		if (IERC20(_token).balanceOf(address(this)) >= _requiredAmount){ 
-			return true
-		};
-		_claimAssets();
-		return IERC20(_token).balanceOf(address(this)) >= _requiredAmount;
-	}
-
-	function _claimAssets() private {
-		IStabilityPool(STABILITY_POOL).withdrawFromSP(0, claimCollaterals);
+		priceFeed = _priceFeed;
 	}
 }

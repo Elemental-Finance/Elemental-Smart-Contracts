@@ -127,7 +127,7 @@ contract SPVault is ERC20Upgradeable, OwnableUpgradeable, ReentrancyGuardUpgrade
 	 * @dev A helper function to call withdraw() with all the sender's funds.
 	 */
 	function withdrawAll() external {
-		withdraw(balanceOf(msg.sender));
+		withdrawTo(balanceOf(msg.sender), msg.sender);
 	}
 
 	/**
@@ -135,22 +135,20 @@ contract SPVault is ERC20Upgradeable, OwnableUpgradeable, ReentrancyGuardUpgrade
 	 * from the strategy and pay up the token holder. A proportional number of IOU
 	 * tokens are burned in the process.
 	 */
-	function withdraw(uint256 _shares) public {
+	function withdrawTo(uint256 _shares, address _to) public {
 		uint256 r = (balance() * _shares) / totalSupply();
 		_burn(msg.sender, _shares);
 
 		uint b = want().balanceOf(address(this));
 		if (b < r) {
 			uint _withdraw = r - b;
-			strategy.withdraw(_withdraw);
+			strategy.withdrawTo(_withdraw, _to);
 			uint _after = want().balanceOf(address(this));
 			uint _diff = _after - b;
 			if (_diff < _withdraw) {
 				r = b + _diff;
 			}
 		}
-
-		want().safeTransfer(msg.sender, r);
 	}
 
 	/**
