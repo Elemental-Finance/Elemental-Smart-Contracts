@@ -55,11 +55,11 @@ contract SPSwapStrategy is SPStrategy, ISPStrategy {
 			revert SPStrategy__InsufficientFundsForSwap();
 		}
 
-		address debtToken = DEBT_TOKEN;
+		address debtToken = WANT_TOKEN;
 		IERC20(debtToken).safeTransferFrom(msg.sender, address(this), _amountIn);
 		IERC20(debtToken).safeTransfer(treasury, fee);
 		IERC20(_tokenOut).safeTransfer(msg.sender, amountOut);
-		deposit(); //deposits funds from swap
+		_deposit(); //deposits funds from swap
 		return amountOut;
 	}
 
@@ -93,12 +93,12 @@ contract SPSwapStrategy is SPStrategy, ISPStrategy {
 	 */
 
 	/// @notice Enable o disable a collateral for swap
-	function setCollateralSwap(address _collateral, bool _whitelisted) external onlyOwner {
+	function setCollateralSwap(address _collateral, bool _whitelisted) external onlyAdmin {
 		swapCollaterals[_collateral] = _whitelisted;
 	}
 
 	/// @notice Set the treasury address
-	function setTreasury(address _treasury) public onlyOwner {
+	function setTreasury(address _treasury) public onlyAdmin {
 		if (_treasury == address(0)) {
 			revert SPStrategy__ZeroAddress();
 		}
@@ -108,7 +108,7 @@ contract SPSwapStrategy is SPStrategy, ISPStrategy {
 
 	/// @notice Set the swap fee
 	/// @param _rate The swap fee rate in basis points
-	function setSwapFee(uint _rate) public onlyOwner {
+	function setSwapFee(uint _rate) public onlyAdmin {
 		swapFee = _rate;
 	}
 

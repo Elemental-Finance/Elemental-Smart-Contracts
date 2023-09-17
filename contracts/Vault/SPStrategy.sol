@@ -5,86 +5,69 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "./Interfaces/IStrategyV7.sol";
+import "./BaseStrategy.sol";
 import "./Interfaces/ISPStrategy.sol";
 import "../Interfaces/IStabilityPool.sol";
 import "../Interfaces/IPriceFeed.sol";
 import "../Interfaces/IERC20Decimals.sol";
 
-contract SPStrategy is IStrategyV7, Ownable {
+contract SPStrategy is BaseStrategy {
 	using SafeERC20 for IERC20;
 
 	uint8 internal constant SHARES_DECIMAL = 18;
-
 	address public immutable STABILITY_POOL;
-	address public immutable DEBT_TOKEN;
-	address public immutable VAULT;
 	address[] public claimCollaterals;
 	address public priceFeed;
 
 	error SPStrategy__ZeroAddress();
 	error SPStrategy__ArrayNotInAscendingOrder();
-	error SPStrategy__OnlyVault();
 
 	constructor(
 		address _debtToken, 
-		address _stabilityPool,
+		address _spAddress,
 		address _vault,
 		address _priceFeed
-	) {
-		DEBT_TOKEN = _debtToken;
-		STABILITY_POOL = _stabilityPool;
-		VAULT = _vault;
+	) BaseStrategy(_debtToken, _vault) {
+		STABILITY_POOL = _spAddress;
 		setPriceFeed(_priceFeed);
 	}
 
 	// ----------------- IStrategyV7 -----------------
 
-	modifier onlyVault() {
-		if(msg.sender != VAULT) {
-			revert SPStrategy__OnlyVault();
-		}
-		_;
-	}
 
-	function vault() external view override returns(address){
-		return VAULT;
-	}
-
-	function want() public view override returns (IERC20Upgradeable) {
-		return IERC20Upgradeable(DEBT_TOKEN);
-	}
-
-	function beforeDeposit() external onlyVault override {
+	function _beforeDeposit() internal override {
 		//does nothing
 	}
 
-	function deposit() public onlyVault override {
+	function _deposit() internal override {
 		uint balance = balanceOfWant();
-		IStabilityPool(STABILITY_POOL).provideToSP(balance, claimCollaterals);
+		_stabilityPool().provideToSP(balance, claimCollaterals);
 	}
 
-	function withdrawTo(uint256 _amount, address _to) external onlyVault override {
+	function _stabilityPool() internal view returns (IStabilityPool){
+		return IStabilityPool(STABILITY_POOL);
+	}
+
+	function _withdrawTo(uint256 _amount, address _to) internal override {
 		uint256 collateralValue = valueOfCollaterals();
 		uint256 wantBal = balanceOf();
 		// Trying not to send dust, only sends debt token if the collat. value is less than 1%
 		bool shouldWithdrawCollateral = (collateralValue * 100_00 / wantBal) > 1_00;
 		if(shouldWithdrawCollateral){
 			uint256 shares = _amount * 10**SHARES_DECIMAL / (wantBal + collateralValue);
-			withdrawDebtToken(wantBal * shares / 10**SHARES_DECIMAL, _to);
-			withdrawCollateralsShare(shares, _to);
+			_withdrawDebtToken(wantBal * shares / 10**SHARES_DECIMAL, _to);
+			_withdrawCollateralsShare(shares, _to);
 		} else {
-			withdrawDebtToken(_amount, _to);
+			_withdrawDebtToken(_amount, _to);
 		}
 	}
 
-	function withdrawDebtToken(uint256 _amount, address _to) internal {
+	function _withdrawDebtToken(uint256 _amount, address _to) internal {
 		IStabilityPool(STABILITY_POOL).withdrawFromSP(_amount, claimCollaterals);
-		IERC20(DEBT_TOKEN).safeTransfer(_to, _amount);
+		IERC20(WANT_TOKEN).safeTransfer(_to, _amount);
 	}
 
-	function withdrawCollateralsShare(uint256 _percentShare, address _to) internal {
+	function _withdrawCollateralsShare(uint256 _percentShare, address _to) internal {
 		for (uint i = 0; i < claimCollaterals.length; i++) {
 			IERC20 token = IERC20(claimCollaterals[i]);
 			uint256 balance = token.balanceOf(address(this));
@@ -142,23 +125,19 @@ contract SPStrategy is IStrategyV7, Ownable {
 	function _claimAssets() internal {
 		IStabilityPool(STABILITY_POOL).withdrawFromSP(0, claimCollaterals);
 	}
-    function retireStrat() external {
-		withdrawToVault();
+
+	function _retireStrat() internal override {
+		_withdrawToVault();
 	}
 
-	function withdrawToVault() internal {
+	function _withdrawToVault() internal {
 		uint256 poolBal = balanceOfPool();
-		withdrawDebtToken(poolBal, VAULT);
-		withdrawCollateralsShare(10**SHARES_DECIMAL, VAULT);
+		_withdrawDebtToken(poolBal, VAULT);
+		_withdrawCollateralsShare(10**SHARES_DECIMAL, VAULT);
 	}
 
-    function panic() external {
-		withdrawToVault();
-	}
-    function pause() onlyOwner external{}
-    function unpause() onlyOwner external{}
-    function paused() external view returns (bool){
-		return false;
+    function _panic() internal override {
+		_withdrawToVault();
 	}
 
 	// ----------------- Admin -----------------
@@ -166,7 +145,7 @@ contract SPStrategy is IStrategyV7, Ownable {
 	/// @notice Set collaterals to claim from the stability pool
 	/// @dev At the claim, the collaterals array must be in ascending order,
 	/// so each time we want to add a collateral to be claim, we must submit the whole array in order
-	function setClaimCollaterals(address[] memory _collaterals) external onlyOwner {
+	function setClaimCollaterals(address[] memory _collaterals) external onlyAdmin {
 		for (uint i = 1; i < _collaterals.length; i++) {
 			if (_collaterals[i] <= _collaterals[i - 1]) {
 				revert SPStrategy__ArrayNotInAscendingOrder();
@@ -176,7 +155,7 @@ contract SPStrategy is IStrategyV7, Ownable {
 	}
 
 	/// @notice Set the price feed address
-	function setPriceFeed(address _priceFeed) public onlyOwner {
+	function setPriceFeed(address _priceFeed) public onlyAdmin {
 		if (_priceFeed == address(0)) {
 			revert SPStrategy__ZeroAddress();
 		}
