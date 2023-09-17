@@ -15,6 +15,8 @@ import "../Interfaces/IERC20Decimals.sol";
 contract SPStrategy is IStrategyV7, Ownable {
 	using SafeERC20 for IERC20;
 
+	uint8 internal constant SHARES_DECIMAL = 18;
+
 	address public immutable STABILITY_POOL;
 	address public immutable DEBT_TOKEN;
 	address public immutable VAULT;
@@ -23,10 +25,6 @@ contract SPStrategy is IStrategyV7, Ownable {
 
 	error SPStrategy__ZeroAddress();
 	error SPStrategy__ArrayNotInAscendingOrder();
-	error SPStrategy__CollateralNotEnabledForSwap();
-	error SPStrategy__InsufficientOutputAmount();
-	error SPStrategy__InsufficientFundsForSwap();
-	error SPStrategy__PriceFeedError();
 	error SPStrategy__OnlyVault();
 
 	constructor(
@@ -73,9 +71,9 @@ contract SPStrategy is IStrategyV7, Ownable {
 		// Trying not to send dust, only sends debt token if the collat. value is less than 1%
 		bool shouldWithdrawCollateral = (collateralValue * 100_00 / wantBal) > 1_00;
 		if(shouldWithdrawCollateral){
-			uint256 shares = _amount * 10**18 / (wantBal + collateralValue);
-			withdrawDebtToken(wantBal * shares / 10**18, _to);
-			withdrawCollaterals(shares, _to);
+			uint256 shares = _amount * 10**SHARES_DECIMAL / (wantBal + collateralValue);
+			withdrawDebtToken(wantBal * shares / 10**SHARES_DECIMAL, _to);
+			withdrawCollateralsShare(shares, _to);
 		} else {
 			withdrawDebtToken(_amount, _to);
 		}
@@ -86,12 +84,12 @@ contract SPStrategy is IStrategyV7, Ownable {
 		IERC20(DEBT_TOKEN).safeTransfer(_to, _amount);
 	}
 
-	function withdrawCollaterals(uint256 _percentShare, address _to) internal {
+	function withdrawCollateralsShare(uint256 _percentShare, address _to) internal {
 		for (uint i = 0; i < claimCollaterals.length; i++) {
 			IERC20 token = IERC20(claimCollaterals[i]);
 			uint256 balance = token.balanceOf(address(this));
-			uint256 amount = _percentShare * balance / 10**18;
-			token.safeTransfer(_to, amount);
+			uint256 amount = _percentShare * balance / 10**SHARES_DECIMAL;
+			token.safeTransfer(_to,amount);
 		}
 	}
 
@@ -145,13 +143,20 @@ contract SPStrategy is IStrategyV7, Ownable {
 		IStabilityPool(STABILITY_POOL).withdrawFromSP(0, claimCollaterals);
 	}
     function retireStrat() external {
-
+		withdrawToVault();
 	}
+
+	function withdrawToVault() internal {
+		uint256 poolBal = balanceOfPool();
+		withdrawDebtToken(poolBal, VAULT);
+		withdrawCollateralsShare(10**SHARES_DECIMAL, VAULT);
+	}
+
     function panic() external {
-
+		withdrawToVault();
 	}
-    function pause() external{}
-    function unpause() external{}
+    function pause() onlyOwner external{}
+    function unpause() onlyOwner external{}
     function paused() external view returns (bool){
 		return false;
 	}

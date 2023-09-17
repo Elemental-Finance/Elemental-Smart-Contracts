@@ -13,6 +13,11 @@ contract SPSwapStrategy is SPStrategy, ISPStrategy {
 	uint public swapFee;
 	mapping(address => bool) public swapCollaterals;
 
+	error SPStrategy__CollateralNotEnabledForSwap();
+	error SPStrategy__InsufficientOutputAmount();
+	error SPStrategy__InsufficientFundsForSwap();
+	error SPStrategy__PriceFeedError();
+
 	constructor(
 		address _debtToken, 
 		address _treasury, 
