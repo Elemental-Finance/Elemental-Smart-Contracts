@@ -21,6 +21,8 @@ abstract contract BaseStrategy is IStrategyV7, AccessControl, Pausable  {
 		address _wantToken, 
 		address _vault
 	) {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(CIRCUIT_BREAKER, msg.sender);
 		WANT_TOKEN = _wantToken;
 		VAULT = _vault;
 	}
